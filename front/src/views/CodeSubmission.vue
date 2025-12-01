@@ -151,8 +151,6 @@
 </template>
 
 <script>
-import axios from 'axios';
-
 export default {
   name: 'CodeSubmission',
   data() {
@@ -201,18 +199,19 @@ export default {
         formData.append('assignment_id', this.formData.assignment_id);
         formData.append('student_id', this.formData.student_id);
 
-        const response = await axios.post(
-          'http://localhost:5015/api/submissions/upload',
-          formData,
-          {
-            headers: {
-              'Content-Type': 'multipart/form-data'
-            }
-          }
-        );
+        const response = await fetch('http://localhost:5015/api/submissions/upload', {
+          method: 'POST',
+          body: formData
+        });
 
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.error || 'Failed to submit code');
+        }
+
+        const data = await response.json();
         this.successMessage = 'Code submitted and analyzed successfully!';
-        this.analysisResult = response.data.analysis;
+        this.analysisResult = data.analysis;
         
         // Reset form
         this.selectedFile = null;
@@ -220,7 +219,7 @@ export default {
         this.$refs.fileInput.value = '';
         
       } catch (error) {
-        this.errorMessage = error.response?.data?.error || 'Failed to submit code';
+        this.errorMessage = error.message || 'Failed to submit code';
         console.error('Submission error:', error);
       } finally {
         this.isSubmitting = false;

@@ -183,8 +183,6 @@
 </template>
 
 <script>
-import axios from 'axios';
-
 export default {
   name: 'PlagiarismChecker',
   data() {
@@ -205,11 +203,17 @@ export default {
       this.results = null;
 
       try {
-        const response = await axios.post(
-          `http://localhost:5015/api/analysis/plagiarism/${this.assignmentId}`
+        const response = await fetch(
+          `http://localhost:5015/api/analysis/plagiarism/${this.assignmentId}`,
+          { method: 'POST' }
         );
 
-        this.results = response.data;
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.error || 'Failed to check plagiarism');
+        }
+
+        this.results = await response.json();
       } catch (error) {
         this.errorMessage = error.response?.data?.error || 'Failed to check plagiarism';
         console.error('Plagiarism check error:', error);
@@ -220,15 +224,20 @@ export default {
 
     async compareSubmissions(submissionAId, submissionBId) {
       try {
-        const response = await axios.post(
-          'http://localhost:5015/api/analysis/compare',
-          {
+        const response = await fetch('http://localhost:5015/api/analysis/compare', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
             submission_a_id: submissionAId,
             submission_b_id: submissionBId
-          }
-        );
+          })
+        });
 
-        this.comparisonData = response.data;
+        if (!response.ok) {
+          throw new Error('Failed to compare submissions');
+        }
+
+        this.comparisonData = await response.json();
       } catch (error) {
         this.errorMessage = 'Failed to compare submissions';
         console.error('Comparison error:', error);

@@ -204,8 +204,6 @@
 </template>
 
 <script>
-import axios from 'axios';
-
 export default {
   name: 'SubmissionsList',
   data() {
@@ -233,8 +231,15 @@ export default {
           ? `http://localhost:5015/api/submissions/student/${this.filters.studentId}?assignment_id=${this.filters.assignmentId}`
           : `http://localhost:5015/api/submissions/list/${this.filters.assignmentId}`;
 
-        const response = await axios.get(url);
-        this.submissions = response.data.submissions || [];
+        const response = await fetch(url);
+        
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.error || 'Failed to load submissions');
+        }
+
+        const data = await response.json();
+        this.submissions = data.submissions || [];
       } catch (error) {
         this.errorMessage = error.response?.data?.error || 'Failed to load submissions';
         console.error('Load error:', error);
@@ -249,12 +254,18 @@ export default {
 
     async checkPlagiarismForSubmission(submissionId) {
       try {
-        const response = await axios.get(
+        const response = await fetch(
           `http://localhost:5015/api/analysis/report/${submissionId}`
         );
         
-        if (response.data.reports_found > 0) {
-          alert(`Found ${response.data.reports_found} plagiarism report(s) for this submission`);
+        if (!response.ok) {
+          throw new Error('Failed to check plagiarism');
+        }
+
+        const data = await response.json();
+        
+        if (data.reports_found > 0) {
+          alert(`Found ${data.reports_found} plagiarism report(s) for this submission`);
         } else {
           alert('No plagiarism detected for this submission');
         }
@@ -268,7 +279,14 @@ export default {
       if (!confirm('Are you sure you want to delete this submission?')) return;
 
       try {
-        await axios.delete(`http://localhost:5015/api/submissions/${submissionId}`);
+        const response = await fetch(`http://localhost:5015/api/submissions/${submissionId}`, {
+          method: 'DELETE'
+        });
+
+        if (!response.ok) {
+          throw new Error('Failed to delete submission');
+        }
+
         this.submissions = this.submissions.filter(s => s.id !== submissionId);
       } catch (error) {
         this.errorMessage = 'Failed to delete submission';
