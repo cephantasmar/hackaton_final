@@ -30,6 +30,9 @@ import DirectorReports from './views/DirectorReports.vue'
 import TeacherDashboard from './views/TeacherDashboard.vue'
 import DirectorDashboard from './views/DirectorDashboard.vue'
 import StudentDashboard from './views/StudentDashboard.vue'
+import CodeSubmission from './views/CodeSubmission.vue'
+import PlagiarismChecker from './views/PlagiarismChecker.vue'
+import SubmissionsList from './views/SubmissionsList.vue'
 
 const routes = [
   { path: '/', redirect: '/landing' },
@@ -66,6 +69,12 @@ const routes = [
   { path: '/director-dashboard', component: DirectorDashboard, meta: { requiresAuth: true, requiresDirector: true, layout: 'app' } },
   { path: '/base', component: Base, meta: { requiresAuth: true, requiresDirector: true, layout: 'app' } },
   { path: '/director', component: DirectorPanel, meta: { requiresAuth: true, requiresDirector: true, layout: 'app' } },
+  
+  // Code Analysis Routes
+  { path: '/code-submission', component: CodeSubmission, meta: { requiresAuth: true, layout: 'app' } },
+  { path: '/plagiarism-checker', component: PlagiarismChecker, meta: { requiresAuth: true, requiresTeacherOrDirector: true, layout: 'app' } },
+  { path: '/submissions-list', component: SubmissionsList, meta: { requiresAuth: true, requiresTeacherOrDirector: true, layout: 'app' } },
+  
   { path: '/:pathMatch(.*)*', redirect: '/signin' }
 ]
 
