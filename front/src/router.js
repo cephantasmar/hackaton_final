@@ -66,6 +66,7 @@ const routes = [
   { path: '/director-dashboard', component: DirectorDashboard, meta: { requiresAuth: true, requiresDirector: true, layout: 'app' } },
   { path: '/base', component: Base, meta: { requiresAuth: true, requiresDirector: true, layout: 'app' } },
   { path: '/director', component: DirectorPanel, meta: { requiresAuth: true, requiresDirector: true, layout: 'app' } },
+  
   { path: '/:pathMatch(.*)*', redirect: '/signin' }
 ]
 

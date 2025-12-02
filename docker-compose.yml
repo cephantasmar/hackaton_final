@@ -71,3 +71,10 @@ services:
       - "5019:5000"
     env_file:
       - ./back/Contact/.env
+
+  codeanalysis:
+    build: ./back/CodeAnalysis
+    ports:
+      - "5015:5000"
+    env_file:
+      - ./back/CodeAnalysis/.env

@@ -154,17 +154,17 @@
 
             <!-- Student view: completion status -->
             <div v-if="userRole === 'Estudiante'" class="assignment-status">
-              <div v-if="item.completion?.status === 'completed'" class="status-completed">
+              <div v-if="item.completion?.status === 'completed' || item.completion?.status === 'completed_with_errors'" class="status-completed">
                 <span class="status-icon">✅</span>
                 <span>Completada el {{ formatDate(item.completion.completed_at) }}</span>
+                <span v-if="item.completion?.status === 'completed_with_errors'" class="status-warning">⚠️ Con errores</span>
               </div>
               <div v-else class="status-pending">
                 <button 
-                  @click="completeAssignment(item.assignment.id)" 
+                  @click="openSubmitModal(item.assignment.id)" 
                   class="btn-complete"
-                  :disabled="completing === item.assignment.id"
                 >
-                  {{ completing === item.assignment.id ? 'Marcando...' : '✓ Marcar como Completada' }}
+                  📤 Entregar Tarea
                 </button>
               </div>
             </div>
@@ -204,6 +204,125 @@
           </article>
         </div>
       </div>
+
+      <!-- Submit Assignment Modal -->
+      <transition name="modal-fade">
+        <div v-if="showSubmitModal" class="modal-overlay" @click="closeSubmitModal">
+          <div class="modal-content" @click.stop>
+            <div class="modal-header">
+              <h2>📤 Entregar Tarea</h2>
+              <button @click="closeSubmitModal" class="modal-close">✕</button>
+            </div>
+            
+            <div class="modal-body">
+              <!-- File Upload Area -->
+              <div class="upload-section">
+                <label class="upload-label">Archivos</label>
+                <div 
+                  class="upload-dropzone"
+                  :class="{ 'dragging': isDragging }"
+                  @drop.prevent="handleDrop"
+                  @dragover.prevent="isDragging = true"
+                  @dragleave.prevent="isDragging = false"
+                >
+                  <input 
+                    type="file" 
+                    ref="fileInput"
+                    @change="handleFileSelect"
+                    multiple
+                    style="display: none"
+                  />
+                  <div class="upload-icon">📁</div>
+                  <p class="upload-text">
+                    Arrastra archivos aquí o 
+                    <button type="button" @click="$refs.fileInput.click()" class="upload-browse">
+                      examinar
+                    </button>
+                  </p>
+                  <p class="upload-hint">Puedes subir código (.py, .js, .java, etc.) y otros documentos</p>
+                </div>
+
+                <!-- File List -->
+                <div v-if="selectedFiles.length > 0" class="file-list">
+                  <div v-for="(file, index) in selectedFiles" :key="index" class="file-item">
+                    <span class="file-icon">{{ getFileIcon(file.name) }}</span>
+                    <div class="file-info">
+                      <span class="file-name">{{ file.name }}</span>
+                      <span class="file-size">{{ formatFileSize(file.size) }}</span>
+                      <span v-if="isCodeFile(file.name)" class="code-badge">📝 Código</span>
+                    </div>
+                    <button @click="removeFile(index)" class="file-remove">✕</button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Notes Section -->
+              <div class="notes-section">
+                <label for="notes" class="notes-label">Notas o comentarios (opcional)</label>
+                <textarea 
+                  id="notes"
+                  v-model="submissionNotes"
+                  class="notes-textarea"
+                  rows="3"
+                  placeholder="Agrega cualquier comentario sobre tu entrega..."
+                ></textarea>
+              </div>
+
+              <!-- Analysis Preview -->
+              <div v-if="codeFileCount > 0" class="analysis-info">
+                <div class="info-icon">🔍</div>
+                <p>
+                  Se encontraron <strong>{{ codeFileCount }}</strong> archivo(s) de código.
+                  Se analizarán automáticamente al entregar.
+                </p>
+              </div>
+
+              <!-- Submission Results -->
+              <div v-if="submissionResult" class="submission-result">
+                <div v-if="submissionResult.success" class="result-success">
+                  <div class="result-icon">✅</div>
+                  <div class="result-content">
+                    <h3>Tarea entregada exitosamente</h3>
+                    <p>Archivos procesados: {{ submissionResult.filesProcessed }}</p>
+                    <p v-if="submissionResult.codeFilesAnalyzed > 0">
+                      Archivos de código analizados: {{ submissionResult.codeFilesAnalyzed }}
+                    </p>
+                    <div v-if="submissionResult.codeAnalysis && submissionResult.codeAnalysis.length > 0" class="analysis-summary">
+                      <h4>Resultados del análisis:</h4>
+                      <div v-for="(analysis, idx) in submissionResult.codeAnalysis" :key="idx" class="analysis-item">
+                        <span class="analysis-file">{{ analysis.fileName }}</span>
+                        <span :class="['analysis-status', analysis.status]">
+                          {{ analysis.status === 'analyzed' ? '✓ Analizado' : '⚠️ Error' }}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div v-else class="result-error">
+                  <div class="result-icon">❌</div>
+                  <div class="result-content">
+                    <h3>Error al entregar</h3>
+                    <p>{{ submissionResult.error }}</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="modal-footer">
+              <button @click="closeSubmitModal" class="btn-cancel" :disabled="submitting">
+                Cancelar
+              </button>
+              <button 
+                @click="submitAssignment" 
+                class="btn-submit"
+                :disabled="submitting || (selectedFiles.length === 0 && !submissionNotes)"
+              >
+                {{ submitting ? '⏳ Enviando...' : '📤 Entregar' }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </transition>
     </section>
   </transition>
 </template>
@@ -222,7 +341,23 @@ const error = ref(null)
 const completing = ref(null)
 const filter = ref('all')
 
+// Submit modal state
+const showSubmitModal = ref(false)
+const currentAssignmentId = ref(null)
+const selectedFiles = ref([])
+const submissionNotes = ref('')
+const isDragging = ref(false)
+const submitting = ref(false)
+const submissionResult = ref(null)
+const fileInput = ref(null)
+
 const TAREAS_API = import.meta.env.VITE_TAREAS_API || 'http://localhost:5011'
+
+const codeFileExtensions = ['.py', '.js', '.ts', '.jsx', '.tsx', '.java', '.cpp', '.c', '.cs', '.html', '.css']
+
+const codeFileCount = computed(() => {
+  return selectedFiles.value.filter(file => isCodeFile(file.name)).length
+})
 
 // Computed properties
 const completedCount = computed(() => {
@@ -344,39 +479,139 @@ async function fetchAssignments() {
   }
 }
 
-async function completeAssignment(assignmentId) {
+// Modal functions
+function openSubmitModal(assignmentId) {
+  currentAssignmentId.value = assignmentId
+  showSubmitModal.value = true
+  selectedFiles.value = []
+  submissionNotes.value = ''
+  submissionResult.value = null
+}
+
+function closeSubmitModal() {
+  if (!submitting.value) {
+    showSubmitModal.value = false
+    currentAssignmentId.value = null
+    selectedFiles.value = []
+    submissionNotes.value = ''
+    submissionResult.value = null
+  }
+}
+
+function handleFileSelect(event) {
+  const files = Array.from(event.target.files)
+  selectedFiles.value = [...selectedFiles.value, ...files]
+  event.target.value = '' // Reset input
+}
+
+function handleDrop(event) {
+  isDragging.value = false
+  const files = Array.from(event.dataTransfer.files)
+  selectedFiles.value = [...selectedFiles.value, ...files]
+}
+
+function removeFile(index) {
+  selectedFiles.value.splice(index, 1)
+}
+
+function isCodeFile(filename) {
+  const ext = filename.substring(filename.lastIndexOf('.')).toLowerCase()
+  return codeFileExtensions.includes(ext)
+}
+
+function getFileIcon(filename) {
+  if (isCodeFile(filename)) return '💻'
+  const ext = filename.substring(filename.lastIndexOf('.')).toLowerCase()
+  if (['.pdf'].includes(ext)) return '📄'
+  if (['.doc', '.docx'].includes(ext)) return '📝'
+  if (['.zip', '.rar'].includes(ext)) return '📦'
+  if (['.png', '.jpg', '.jpeg', '.gif'].includes(ext)) return '🖼️'
+  return '📎'
+}
+
+function formatFileSize(bytes) {
+  if (bytes === 0) return '0 Bytes'
+  const k = 1024
+  const sizes = ['Bytes', 'KB', 'MB', 'GB']
+  const i = Math.floor(Math.log(bytes) / Math.log(k))
+  return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i]
+}
+
+async function submitAssignment() {
+  if (submitting.value) return
+  
   try {
-    completing.value = assignmentId
+    submitting.value = true
+    submissionResult.value = null
 
     const { data: { session } } = await supabase.auth.getSession()
-    if (!session) return
+    if (!session) {
+      submissionResult.value = { success: false, error: 'No estás autenticado' }
+      return
+    }
 
-    const response = await fetch(`${TAREAS_API}/api/assignments/${assignmentId}/complete?email=${session.user.email}`, {
-      method: 'POST',
-      headers: { 
-        'Authorization': `Bearer ${session.access_token}`,
-        'X-User-Email': session.user.email
-      }
+    const formData = new FormData()
+    
+    // Add files
+    selectedFiles.value.forEach(file => {
+      formData.append('files', file)
     })
+    
+    // Add notes
+    if (submissionNotes.value) {
+      formData.append('notes', submissionNotes.value)
+    }
+
+    const response = await fetch(
+      `${TAREAS_API}/api/assignments/${currentAssignmentId.value}/complete`,
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+          'X-User-Email': session.user.email
+        },
+        body: formData
+      }
+    )
 
     if (response.ok) {
+      const data = await response.json()
+      submissionResult.value = {
+        success: true,
+        filesProcessed: data.filesProcessed,
+        codeFilesAnalyzed: data.codeFilesAnalyzed,
+        codeAnalysis: data.codeAnalysis,
+        status: data.status
+      }
+
       // Update local state
-      const assignment = assignments.value.find(a => a.assignment.id === assignmentId)
+      const assignment = assignments.value.find(a => a.assignment.id === currentAssignmentId.value)
       if (assignment) {
         assignment.completion = {
           completed_at: new Date().toISOString(),
-          status: 'completed'
+          status: data.status
         }
       }
+
+      // Close modal after 3 seconds on success
+      setTimeout(() => {
+        closeSubmitModal()
+      }, 3000)
     } else {
       const data = await response.json()
-      alert(data.detail || 'Error al completar tarea')
+      submissionResult.value = {
+        success: false,
+        error: data.detail || data.title || 'Error al entregar tarea'
+      }
     }
   } catch (e) {
-    console.error('Error completing assignment:', e)
-    alert('Error al completar tarea')
+    console.error('Error submitting assignment:', e)
+    submissionResult.value = {
+      success: false,
+      error: 'Error de conexión al entregar tarea'
+    }
   } finally {
-    completing.value = null
+    submitting.value = false
   }
 }
 
@@ -816,6 +1051,393 @@ onMounted(() => {
   opacity: 0;
 }
 
+/* Modal Styles */
+.modal-fade-enter-active, .modal-fade-leave-active {
+  transition: opacity 0.3s;
+}
+
+.modal-fade-enter-from, .modal-fade-leave-to {
+  opacity: 0;
+}
+
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 1rem;
+}
+
+.modal-content {
+  background: white;
+  border-radius: 16px;
+  max-width: 600px;
+  width: 100%;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1.5rem;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.modal-header h2 {
+  margin: 0;
+  font-size: 1.5rem;
+  color: #1f2937;
+}
+
+.modal-close {
+  background: none;
+  border: none;
+  font-size: 1.5rem;
+  color: #6b7280;
+  cursor: pointer;
+  padding: 0.5rem;
+  line-height: 1;
+  border-radius: 4px;
+  transition: background 0.2s;
+}
+
+.modal-close:hover {
+  background: #f3f4f6;
+}
+
+.modal-body {
+  padding: 1.5rem;
+}
+
+.upload-section {
+  margin-bottom: 1.5rem;
+}
+
+.upload-label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+  color: #374151;
+}
+
+.upload-dropzone {
+  border: 2px dashed #d1d5db;
+  border-radius: 12px;
+  padding: 2rem;
+  text-align: center;
+  background: #f9fafb;
+  transition: all 0.2s;
+  cursor: pointer;
+}
+
+.upload-dropzone:hover, .upload-dropzone.dragging {
+  border-color: #2a4dd0;
+  background: #eff6ff;
+}
+
+.upload-icon {
+  font-size: 3rem;
+  margin-bottom: 0.5rem;
+}
+
+.upload-text {
+  margin: 0.5rem 0;
+  color: #6b7280;
+}
+
+.upload-browse {
+  background: none;
+  border: none;
+  color: #2a4dd0;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.upload-hint {
+  margin: 0.5rem 0 0 0;
+  font-size: 0.875rem;
+  color: #9ca3af;
+}
+
+.file-list {
+  margin-top: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.file-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+}
+
+.file-icon {
+  font-size: 1.5rem;
+}
+
+.file-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.file-name {
+  font-weight: 500;
+  color: #374151;
+  font-size: 0.875rem;
+}
+
+.file-size {
+  font-size: 0.75rem;
+  color: #6b7280;
+}
+
+.code-badge {
+  display: inline-block;
+  background: #dbeafe;
+  color: #1e40af;
+  padding: 0.125rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  margin-top: 0.25rem;
+  width: fit-content;
+}
+
+.file-remove {
+  background: #fee2e2;
+  border: none;
+  color: #991b1b;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: 0.875rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s;
+}
+
+.file-remove:hover {
+  background: #fecaca;
+}
+
+.notes-section {
+  margin-bottom: 1.5rem;
+}
+
+.notes-label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+  color: #374151;
+}
+
+.notes-textarea {
+  width: 100%;
+  padding: 0.75rem;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 0.875rem;
+  resize: vertical;
+  transition: border-color 0.2s;
+}
+
+.notes-textarea:focus {
+  outline: none;
+  border-color: #2a4dd0;
+  box-shadow: 0 0 0 3px rgba(42, 77, 208, 0.1);
+}
+
+.analysis-info {
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  padding: 1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.info-icon {
+  font-size: 1.5rem;
+}
+
+.analysis-info p {
+  margin: 0;
+  color: #1e40af;
+  font-size: 0.875rem;
+}
+
+.submission-result {
+  margin-top: 1rem;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.result-success, .result-error {
+  display: flex;
+  gap: 1rem;
+  padding: 1rem;
+}
+
+.result-success {
+  background: #d1fae5;
+  border: 1px solid #6ee7b7;
+}
+
+.result-error {
+  background: #fee2e2;
+  border: 1px solid #fecaca;
+}
+
+.result-icon {
+  font-size: 2rem;
+}
+
+.result-content {
+  flex: 1;
+}
+
+.result-content h3 {
+  margin: 0 0 0.5rem 0;
+  font-size: 1rem;
+}
+
+.result-content p {
+  margin: 0.25rem 0;
+  font-size: 0.875rem;
+}
+
+.result-success h3 {
+  color: #065f46;
+}
+
+.result-success p {
+  color: #047857;
+}
+
+.result-error h3 {
+  color: #991b1b;
+}
+
+.result-error p {
+  color: #b91c1c;
+}
+
+.analysis-summary {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid #a7f3d0;
+}
+
+.analysis-summary h4 {
+  margin: 0 0 0.5rem 0;
+  font-size: 0.875rem;
+  color: #065f46;
+}
+
+.analysis-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.5rem;
+  background: white;
+  border-radius: 4px;
+  margin-bottom: 0.25rem;
+}
+
+.analysis-file {
+  font-size: 0.875rem;
+  color: #374151;
+  font-weight: 500;
+}
+
+.analysis-status {
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+}
+
+.analysis-status.analyzed {
+  background: #d1fae5;
+  color: #065f46;
+}
+
+.analysis-status.error {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  padding: 1.5rem;
+  border-top: 1px solid #e5e7eb;
+}
+
+.btn-cancel, .btn-submit {
+  padding: 0.75rem 1.5rem;
+  border-radius: 8px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  border: none;
+  font-size: 0.875rem;
+}
+
+.btn-cancel {
+  background: #f3f4f6;
+  color: #374151;
+}
+
+.btn-cancel:hover:not(:disabled) {
+  background: #e5e7eb;
+}
+
+.btn-submit {
+  background: #2a4dd0;
+  color: white;
+}
+
+.btn-submit:hover:not(:disabled) {
+  background: #1e3a8a;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(42, 77, 208, 0.3);
+}
+
+.btn-cancel:disabled, .btn-submit:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.status-warning {
+  margin-left: 0.5rem;
+  font-size: 0.875rem;
+  color: #f59e0b;
+}
+
 /* Responsive */
 @media (max-width: 768px) {
   .stats-grid {
@@ -833,6 +1455,19 @@ onMounted(() => {
   .btn-primary, .btn-secondary {
     width: 100%;
     justify-content: center;
+  }
+
+  .modal-content {
+    max-width: 100%;
+    margin: 0.5rem;
+  }
+
+  .modal-footer {
+    flex-direction: column;
+  }
+
+  .btn-cancel, .btn-submit {
+    width: 100%;
   }
 }
 </style>

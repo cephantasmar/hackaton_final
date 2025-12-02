@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Supabase;
 using Supabase.Postgrest.Models;
 using Supabase.Postgrest.Attributes;
@@ -1535,6 +1536,696 @@ app.MapGet("/api/debug/full-diagnostics", async (HttpContext context, [FromServi
         return Results.Problem($"Error: {ex.Message}");
     }
 }).RequireAuthorization();
+// 🔹 COMPLETAR TAREA CON ARCHIVOS
+app.MapPost("/api/assignments/{assignmentId}/complete", async (
+    HttpContext context,
+    int assignmentId,
+    [FromServices] Client supabase
+) =>
+{
+    Console.WriteLine($"📤 Endpoint: Completar tarea {assignmentId} con archivos");
+    
+    try
+    {
+        var email = context.User.FindFirst("http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress")?.Value;
+        if (string.IsNullOrEmpty(email))
+        {
+            Console.WriteLine("❌ Usuario no autenticado");
+            return Results.Unauthorized();
+        }
+
+        var user = await GetUserFromToken(email);
+        if (user == null)
+        {
+            Console.WriteLine("❌ Usuario no encontrado");
+            return Results.NotFound("Usuario no encontrado");
+        }
+
+        var tenant = GetTenantFromEmail(email);
+        var form = await context.Request.ReadFormAsync();
+        var files = form.Files;
+        var notes = form["notes"].ToString();
+
+        Console.WriteLine($"📦 Usuario: {email}, Archivos: {files.Count}");
+
+        // Validar que el estudiante esté inscrito en el curso
+        bool isEnrolled = false;
+        int courseId = 0;
+
+        if (tenant == "ucb")
+        {
+            var assignment = await supabase.From<AssignmentUcb>()
+                .Where(x => x.Id == assignmentId)
+                .Single();
+            
+            if (assignment == null)
+            {
+                Console.WriteLine("❌ Tarea no encontrada");
+                return Results.NotFound("Tarea no encontrada");
+            }
+
+            courseId = assignment.CursoId;
+
+            var enrollment = await supabase.From<InscripcionUcb>()
+                .Where(x => x.UsuarioId == user.Id && x.CursoId == courseId)
+                .Get();
+            
+            isEnrolled = enrollment.Models.Any();
+        }
+        else if (tenant == "upb")
+        {
+            var assignment = await supabase.From<AssignmentUpb>()
+                .Where(x => x.Id == assignmentId)
+                .Single();
+            
+            if (assignment == null)
+            {
+                Console.WriteLine("❌ Tarea no encontrada");
+                return Results.NotFound("Tarea no encontrada");
+            }
+
+            courseId = assignment.CursoId;
+
+            var enrollment = await supabase.From<InscripcionUpb>()
+                .Where(x => x.UsuarioId == user.Id && x.CursoId == courseId)
+                .Get();
+            
+            isEnrolled = enrollment.Models.Any();
+        }
+        else // gmail
+        {
+            var assignment = await supabase.From<AssignmentGmail>()
+                .Where(x => x.Id == assignmentId)
+                .Single();
+            
+            if (assignment == null)
+            {
+                Console.WriteLine("❌ Tarea no encontrada");
+                return Results.NotFound("Tarea no encontrada");
+            }
+
+            courseId = assignment.CursoId;
+
+            var enrollment = await supabase.From<InscripcionGmail>()
+                .Where(x => x.UsuarioId == user.Id && x.CursoId == courseId)
+                .Get();
+            
+            isEnrolled = enrollment.Models.Any();
+        }
+
+        if (!isEnrolled)
+        {
+            Console.WriteLine("❌ Estudiante no inscrito en el curso");
+            return Results.Problem("No estás inscrito en este curso");
+        }
+
+        // Procesar archivos
+        var fileResults = new List<object>();
+        var codeAnalysisResults = new List<object>();
+        var codeFileExtensions = new[] { ".py", ".js", ".ts", ".jsx", ".tsx", ".java", ".cpp", ".c", ".cs", ".html", ".css" };
+
+        using var httpClient = new HttpClient();
+        httpClient.BaseAddress = new Uri("http://localhost:5015");
+
+        foreach (var file in files)
+        {
+            var extension = Path.GetExtension(file.FileName).ToLowerInvariant();
+            var isCodeFile = codeFileExtensions.Contains(extension);
+
+            Console.WriteLine($"📄 Procesando archivo: {file.FileName} (Código: {isCodeFile}, Tamaño: {file.Length} bytes)");
+
+            // Guardar archivo en la base de datos
+            try
+            {
+                using var memoryStream = new MemoryStream();
+                await file.CopyToAsync(memoryStream);
+                var fileBytes = memoryStream.ToArray();
+
+                if (tenant == "ucb")
+                {
+                    var fileRecord = new AssignmentFileUcb
+                    {
+                        AssignmentId = assignmentId,
+                        StudentId = user.Id,
+                        FileName = file.FileName,
+                        FileContent = fileBytes,
+                        FileSize = file.Length,
+                        ContentType = file.ContentType ?? "application/octet-stream",
+                        IsCodeFile = isCodeFile,
+                        UploadedAt = DateTime.UtcNow
+                    };
+                    await supabase.From<AssignmentFileUcb>().Insert(fileRecord, new Supabase.Postgrest.QueryOptions { Returning = Supabase.Postgrest.QueryOptions.ReturnType.Minimal });
+                }
+                else if (tenant == "upb")
+                {
+                    var fileRecord = new AssignmentFileUpb
+                    {
+                        AssignmentId = assignmentId,
+                        StudentId = user.Id,
+                        FileName = file.FileName,
+                        FileContent = fileBytes,
+                        FileSize = file.Length,
+                        ContentType = file.ContentType ?? "application/octet-stream",
+                        IsCodeFile = isCodeFile,
+                        UploadedAt = DateTime.UtcNow
+                    };
+                    await supabase.From<AssignmentFileUpb>().Insert(fileRecord, new Supabase.Postgrest.QueryOptions { Returning = Supabase.Postgrest.QueryOptions.ReturnType.Minimal });
+                }
+                else // gmail
+                {
+                    var fileRecord = new AssignmentFileGmail
+                    {
+                        AssignmentId = assignmentId,
+                        StudentId = user.Id,
+                        FileName = file.FileName,
+                        FileContent = fileBytes,
+                        FileSize = file.Length,
+                        ContentType = file.ContentType ?? "application/octet-stream",
+                        IsCodeFile = isCodeFile,
+                        UploadedAt = DateTime.UtcNow
+                    };
+                    await supabase.From<AssignmentFileGmail>().Insert(fileRecord, new Supabase.Postgrest.QueryOptions { Returning = Supabase.Postgrest.QueryOptions.ReturnType.Minimal });
+                }
+
+                Console.WriteLine($"💾 Archivo guardado en base de datos: {file.FileName}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"💥 Error guardando archivo {file.FileName}: {ex.Message}");
+            }
+
+            // Si es archivo de código, enviar al microservicio de análisis
+            if (isCodeFile && file.Length > 0)
+            {
+                try
+                {
+                    // Resetear el stream del archivo
+                    using var content = new MultipartFormDataContent();
+                    using var fileStream = file.OpenReadStream();
+                    using var streamContent = new StreamContent(fileStream);
+                    
+                    streamContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(file.ContentType ?? "application/octet-stream");
+                    content.Add(streamContent, "file", file.FileName);
+                    content.Add(new StringContent(assignmentId.ToString()), "assignment_id");
+                    content.Add(new StringContent(user.Id.ToString()), "student_id");
+
+                    var response = await httpClient.PostAsync("/api/submissions/upload", content);
+                    
+                    if (response.IsSuccessStatusCode)
+                    {
+                        var responseContent = await response.Content.ReadAsStringAsync();
+                        Console.WriteLine($"✅ Análisis completado para {file.FileName}");
+                        codeAnalysisResults.Add(new
+                        {
+                            fileName = file.FileName,
+                            status = "analyzed",
+                            response = responseContent
+                        });
+                    }
+                    else
+                    {
+                        var errorContent = await response.Content.ReadAsStringAsync();
+                        Console.WriteLine($"⚠️ Error analizando {file.FileName}: {errorContent}");
+                        codeAnalysisResults.Add(new
+                        {
+                            fileName = file.FileName,
+                            status = "error",
+                            error = errorContent
+                        });
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"💥 Error procesando {file.FileName}: {ex.Message}");
+                    codeAnalysisResults.Add(new
+                    {
+                        fileName = file.FileName,
+                        status = "error",
+                        error = ex.Message
+                    });
+                }
+            }
+
+            fileResults.Add(new
+            {
+                fileName = file.FileName,
+                size = file.Length,
+                isCode = isCodeFile,
+                extension = extension
+            });
+        }
+
+        // Crear o actualizar registro de completación
+        var completedAt = DateTime.UtcNow;
+        var status = codeAnalysisResults.Any(r => r.GetType().GetProperty("status")?.GetValue(r)?.ToString() == "error") 
+            ? "completed_with_errors" 
+            : "completed";
+
+        if (tenant == "ucb")
+        {
+            var existing = await supabase.From<AssignmentCompletionUcb>()
+                .Where(x => x.AssignmentId == assignmentId && x.StudentId == user.Id)
+                .Get();
+
+            if (existing.Models.Any())
+            {
+                var completion = existing.Models.First();
+                completion.CompletedAt = completedAt;
+                completion.Status = status;
+                completion.SubmittedContent = notes;
+                await supabase.From<AssignmentCompletionUcb>().Update(completion);
+            }
+            else
+            {
+                var newCompletion = new AssignmentCompletionUcb
+                {
+                    AssignmentId = assignmentId,
+                    StudentId = user.Id,
+                    CompletedAt = completedAt,
+                    Status = status,
+                    SubmittedContent = notes
+                };
+                var response = await supabase.From<AssignmentCompletionUcb>().Insert(newCompletion, new Supabase.Postgrest.QueryOptions { Returning = Supabase.Postgrest.QueryOptions.ReturnType.Minimal });
+                Console.WriteLine($"✅ Completación UCB creada");
+            }
+        }
+        else if (tenant == "upb")
+        {
+            var existing = await supabase.From<AssignmentCompletionUpb>()
+                .Where(x => x.AssignmentId == assignmentId && x.StudentId == user.Id)
+                .Get();
+
+            if (existing.Models.Any())
+            {
+                var completion = existing.Models.First();
+                completion.CompletedAt = completedAt;
+                completion.Status = status;
+                completion.SubmittedContent = notes;
+                await supabase.From<AssignmentCompletionUpb>().Update(completion);
+            }
+            else
+            {
+                var newCompletion = new AssignmentCompletionUpb
+                {
+                    AssignmentId = assignmentId,
+                    StudentId = user.Id,
+                    CompletedAt = completedAt,
+                    Status = status,
+                    SubmittedContent = notes
+                };
+                var response = await supabase.From<AssignmentCompletionUpb>().Insert(newCompletion, new Supabase.Postgrest.QueryOptions { Returning = Supabase.Postgrest.QueryOptions.ReturnType.Minimal });
+                Console.WriteLine($"✅ Completación UPB creada");
+            }
+        }
+        else // gmail
+        {
+            var existing = await supabase.From<AssignmentCompletionGmail>()
+                .Where(x => x.AssignmentId == assignmentId && x.StudentId == user.Id)
+                .Get();
+
+            if (existing.Models.Any())
+            {
+                var completion = existing.Models.First();
+                completion.CompletedAt = completedAt;
+                completion.Status = status;
+                completion.SubmittedContent = notes;
+                await supabase.From<AssignmentCompletionGmail>().Update(completion);
+            }
+            else
+            {
+                var newCompletion = new AssignmentCompletionGmail
+                {
+                    AssignmentId = assignmentId,
+                    StudentId = user.Id,
+                    CompletedAt = completedAt,
+                    Status = status,
+                    SubmittedContent = notes
+                };
+                var response = await supabase.From<AssignmentCompletionGmail>().Insert(newCompletion, new Supabase.Postgrest.QueryOptions { Returning = Supabase.Postgrest.QueryOptions.ReturnType.Minimal });
+                Console.WriteLine($"✅ Completación Gmail creada");
+            }
+        }
+
+        Console.WriteLine($"✅ Tarea completada. Archivos: {files.Count}, Código analizado: {codeAnalysisResults.Count}");
+
+        return Results.Ok(new
+        {
+            message = "Tarea completada exitosamente",
+            filesProcessed = files.Count,
+            codeFilesAnalyzed = codeAnalysisResults.Count,
+            files = fileResults,
+            codeAnalysis = codeAnalysisResults,
+            status = status
+        });
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"💥 Error completando tarea: {ex.Message}");
+        Console.WriteLine($"💥 Stack trace: {ex.StackTrace}");
+        return Results.Problem($"Error completando tarea: {ex.Message}");
+    }
+}).RequireAuthorization()
+  .DisableAntiforgery(); // Necesario para file uploads
+
+// 🔹 DESCARGAR ARCHIVO DE TAREA
+app.MapGet("/api/assignments/{assignmentId}/files/{fileId}", async (
+    HttpContext context,
+    int assignmentId,
+    int fileId,
+    [FromServices] Client supabase
+) =>
+{
+    Console.WriteLine($"📥 Endpoint: Descargar archivo {fileId} de tarea {assignmentId}");
+    
+    try
+    {
+        var email = context.User.FindFirst("http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress")?.Value;
+        if (string.IsNullOrEmpty(email))
+        {
+            Console.WriteLine("❌ Usuario no autenticado");
+            return Results.Unauthorized();
+        }
+
+        var user = await GetUserFromToken(email);
+        if (user == null)
+        {
+            Console.WriteLine("❌ Usuario no encontrado");
+            return Results.NotFound("Usuario no encontrado");
+        }
+
+        var tenant = GetTenantFromEmail(email);
+        
+        // Buscar el archivo según el tenant
+        if (tenant == "ucb")
+        {
+            var fileRecord = await supabase.From<AssignmentFileUcb>()
+                .Where(x => x.Id == fileId && x.AssignmentId == assignmentId)
+                .Single();
+
+            if (fileRecord == null)
+            {
+                Console.WriteLine("❌ Archivo no encontrado");
+                return Results.NotFound("Archivo no encontrado");
+            }
+
+            // Verificar permisos: solo el estudiante que subió el archivo o profesores pueden descargarlo
+            if (user.Rol == "Estudiante" && fileRecord.StudentId != user.Id)
+            {
+                Console.WriteLine("❌ Sin permiso para descargar este archivo");
+                return Results.Forbid();
+            }
+
+            Console.WriteLine($"✅ Descargando: {fileRecord.FileName} ({fileRecord.FileSize} bytes)");
+            return Results.File(fileRecord.FileContent, fileRecord.ContentType, fileRecord.FileName);
+        }
+        else if (tenant == "upb")
+        {
+            var fileRecord = await supabase.From<AssignmentFileUpb>()
+                .Where(x => x.Id == fileId && x.AssignmentId == assignmentId)
+                .Single();
+
+            if (fileRecord == null)
+            {
+                Console.WriteLine("❌ Archivo no encontrado");
+                return Results.NotFound("Archivo no encontrado");
+            }
+
+            if (user.Rol == "Estudiante" && fileRecord.StudentId != user.Id)
+            {
+                Console.WriteLine("❌ Sin permiso para descargar este archivo");
+                return Results.Forbid();
+            }
+
+            Console.WriteLine($"✅ Descargando: {fileRecord.FileName} ({fileRecord.FileSize} bytes)");
+            return Results.File(fileRecord.FileContent, fileRecord.ContentType, fileRecord.FileName);
+        }
+        else // gmail
+        {
+            var fileRecord = await supabase.From<AssignmentFileGmail>()
+                .Where(x => x.Id == fileId && x.AssignmentId == assignmentId)
+                .Single();
+
+            if (fileRecord == null)
+            {
+                Console.WriteLine("❌ Archivo no encontrado");
+                return Results.NotFound("Archivo no encontrado");
+            }
+
+            if (user.Rol == "Estudiante" && fileRecord.StudentId != user.Id)
+            {
+                Console.WriteLine("❌ Sin permiso para descargar este archivo");
+                return Results.Forbid();
+            }
+
+            Console.WriteLine($"✅ Descargando: {fileRecord.FileName} ({fileRecord.FileSize} bytes)");
+            return Results.File(fileRecord.FileContent, fileRecord.ContentType, fileRecord.FileName);
+        }
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"💥 Error descargando archivo: {ex.Message}");
+        return Results.Problem($"Error descargando archivo: {ex.Message}");
+    }
+}).RequireAuthorization();
+
+// 🔹 LISTAR ARCHIVOS DE UNA ENTREGA
+app.MapGet("/api/assignments/{assignmentId}/files", async (
+    HttpContext context,
+    int assignmentId,
+    [FromQuery] int? studentId,
+    [FromServices] Client supabase
+) =>
+{
+    Console.WriteLine($"📋 Endpoint: Listar archivos de tarea {assignmentId}");
+    
+    try
+    {
+        var email = context.User.FindFirst("http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress")?.Value;
+        if (string.IsNullOrEmpty(email))
+        {
+            Console.WriteLine("❌ Usuario no autenticado");
+            return Results.Unauthorized();
+        }
+
+        var user = await GetUserFromToken(email);
+        if (user == null)
+        {
+            Console.WriteLine("❌ Usuario no encontrado");
+            return Results.NotFound("Usuario no encontrado");
+        }
+
+        var tenant = GetTenantFromEmail(email);
+        var targetStudentId = studentId ?? user.Id;
+
+        // Si es estudiante, solo puede ver sus propios archivos
+        if (user.Rol == "Estudiante" && targetStudentId != user.Id)
+        {
+            Console.WriteLine("❌ Sin permiso para ver archivos de otros estudiantes");
+            return Results.Forbid();
+        }
+
+        var files = new List<object>();
+
+        if (tenant == "ucb")
+        {
+            var fileRecords = await supabase.From<AssignmentFileUcb>()
+                .Where(x => x.AssignmentId == assignmentId && x.StudentId == targetStudentId)
+                .Get();
+
+            files = fileRecords.Models.Select(f => new
+            {
+                id = f.Id,
+                fileName = f.FileName,
+                fileSize = f.FileSize,
+                contentType = f.ContentType,
+                isCodeFile = f.IsCodeFile,
+                uploadedAt = f.UploadedAt,
+                downloadUrl = $"/api/assignments/{assignmentId}/files/{f.Id}"
+            }).ToList<object>();
+        }
+        else if (tenant == "upb")
+        {
+            var fileRecords = await supabase.From<AssignmentFileUpb>()
+                .Where(x => x.AssignmentId == assignmentId && x.StudentId == targetStudentId)
+                .Get();
+
+            files = fileRecords.Models.Select(f => new
+            {
+                id = f.Id,
+                fileName = f.FileName,
+                fileSize = f.FileSize,
+                contentType = f.ContentType,
+                isCodeFile = f.IsCodeFile,
+                uploadedAt = f.UploadedAt,
+                downloadUrl = $"/api/assignments/{assignmentId}/files/{f.Id}"
+            }).ToList<object>();
+        }
+        else // gmail
+        {
+            var fileRecords = await supabase.From<AssignmentFileGmail>()
+                .Where(x => x.AssignmentId == assignmentId && x.StudentId == targetStudentId)
+                .Get();
+
+            files = fileRecords.Models.Select(f => new
+            {
+                id = f.Id,
+                fileName = f.FileName,
+                fileSize = f.FileSize,
+                contentType = f.ContentType,
+                isCodeFile = f.IsCodeFile,
+                uploadedAt = f.UploadedAt,
+                downloadUrl = $"/api/assignments/{assignmentId}/files/{f.Id}"
+            }).ToList<object>();
+        }
+
+        Console.WriteLine($"✅ Encontrados {files.Count} archivos");
+        return Results.Ok(new { files = files, total = files.Count });
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"💥 Error listando archivos: {ex.Message}");
+        return Results.Problem($"Error listando archivos: {ex.Message}");
+    }
+}).RequireAuthorization();
+
+// 🔹 LISTAR ENTREGAS DE UNA TAREA (PARA PROFESORES)
+app.MapGet("/api/assignments/{assignmentId}/submissions", async (
+    HttpContext context,
+    int assignmentId,
+    [FromServices] Client supabase
+) =>
+{
+    Console.WriteLine($"📋 Endpoint: Listar entregas de tarea {assignmentId}");
+    
+    try
+    {
+        var email = context.User.FindFirst("http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress")?.Value;
+        if (string.IsNullOrEmpty(email))
+        {
+            Console.WriteLine("❌ Usuario no autenticado");
+            return Results.Unauthorized();
+        }
+
+        var user = await GetUserFromToken(email);
+        if (user == null)
+        {
+            Console.WriteLine("❌ Usuario no encontrado");
+            return Results.NotFound("Usuario no encontrado");
+        }
+
+        // Solo profesores pueden ver todas las entregas
+        if (user.Rol != "Profesor")
+        {
+            Console.WriteLine("❌ Solo profesores pueden ver las entregas");
+            return Results.Forbid();
+        }
+
+        var tenant = GetTenantFromEmail(email);
+        var submissions = new List<object>();
+
+        if (tenant == "ucb")
+        {
+            var completions = await supabase.From<AssignmentCompletionUcb>()
+                .Where(x => x.AssignmentId == assignmentId)
+                .Get();
+
+            foreach (var completion in completions.Models)
+            {
+                // Obtener información del estudiante
+                var student = await supabase.From<UsuarioUcb>()
+                    .Where(x => x.Id == completion.StudentId)
+                    .Single();
+
+                // Contar archivos del estudiante
+                var filesCount = await supabase.From<AssignmentFileUcb>()
+                    .Where(x => x.AssignmentId == assignmentId && x.StudentId == completion.StudentId)
+                    .Get();
+
+                submissions.Add(new
+                {
+                    student_id = completion.StudentId,
+                    student_name = student?.Nombre,
+                    student_email = student?.Email,
+                    completed_at = completion.CompletedAt,
+                    status = completion.Status,
+                    submitted_content = completion.SubmittedContent,
+                    grade = completion.Grade,
+                    feedback = completion.Feedback,
+                    file_count = filesCount.Models.Count
+                });
+            }
+        }
+        else if (tenant == "upb")
+        {
+            var completions = await supabase.From<AssignmentCompletionUpb>()
+                .Where(x => x.AssignmentId == assignmentId)
+                .Get();
+
+            foreach (var completion in completions.Models)
+            {
+                var student = await supabase.From<UsuarioUpb>()
+                    .Where(x => x.Id == completion.StudentId)
+                    .Single();
+
+                var filesCount = await supabase.From<AssignmentFileUpb>()
+                    .Where(x => x.AssignmentId == assignmentId && x.StudentId == completion.StudentId)
+                    .Get();
+
+                submissions.Add(new
+                {
+                    student_id = completion.StudentId,
+                    student_name = student?.Nombre,
+                    student_email = student?.Email,
+                    completed_at = completion.CompletedAt,
+                    status = completion.Status,
+                    submitted_content = completion.SubmittedContent,
+                    grade = completion.Grade,
+                    feedback = completion.Feedback,
+                    file_count = filesCount.Models.Count
+                });
+            }
+        }
+        else // gmail
+        {
+            var completions = await supabase.From<AssignmentCompletionGmail>()
+                .Where(x => x.AssignmentId == assignmentId)
+                .Get();
+
+            foreach (var completion in completions.Models)
+            {
+                var student = await supabase.From<UsuarioGmail>()
+                    .Where(x => x.Id == completion.StudentId)
+                    .Single();
+
+                var filesCount = await supabase.From<AssignmentFileGmail>()
+                    .Where(x => x.AssignmentId == assignmentId && x.StudentId == completion.StudentId)
+                    .Get();
+
+                submissions.Add(new
+                {
+                    student_id = completion.StudentId,
+                    student_name = student?.Nombre,
+                    student_email = student?.Email,
+                    completed_at = completion.CompletedAt,
+                    status = completion.Status,
+                    submitted_content = completion.SubmittedContent,
+                    grade = completion.Grade,
+                    feedback = completion.Feedback,
+                    file_count = filesCount.Models.Count
+                });
+            }
+        }
+
+        Console.WriteLine($"✅ Encontradas {submissions.Count} entregas");
+        return Results.Ok(new { submissions = submissions, total = submissions.Count });
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"💥 Error listando entregas: {ex.Message}");
+        return Results.Problem($"Error listando entregas: {ex.Message}");
+    }
+}).RequireAuthorization();
+
 // Método helper para obtener nombres de columnas
 static List<string> GetColumnNames(object obj)
 {
@@ -1666,7 +2357,8 @@ public class AssignmentUcb : BaseModel
 public class AssignmentCompletionUcb : BaseModel
 {
     [PrimaryKey("id", true)]
-    public int Id { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public long Id { get; set; }
     
     [Column("assignment_id")]
     public int AssignmentId { get; set; }
@@ -1783,7 +2475,8 @@ public class AssignmentUpb : BaseModel
 public class AssignmentCompletionUpb : BaseModel
 {
     [PrimaryKey("id", true)]
-    public int Id { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public long Id { get; set; }
     
     [Column("assignment_id")]
     public int AssignmentId { get; set; }
@@ -1900,7 +2593,8 @@ public class AssignmentGmail : BaseModel
 public class AssignmentCompletionGmail : BaseModel
 {
     [PrimaryKey("id", true)]
-    public int Id { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public long Id { get; set; }
     
     [Column("assignment_id")]
     public int AssignmentId { get; set; }
@@ -1935,4 +2629,101 @@ public class InscripcionGmail : BaseModel
     
     [Column("curso_id")]
     public int CursoId { get; set; }
+}
+
+// Modelos para archivos de tareas (multi-tenant)
+[Table("tenant_ucb_assignment_files")]
+public class AssignmentFileUcb : BaseModel
+{
+    [PrimaryKey("id", true)]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public long Id { get; set; }
+    
+    [Column("assignment_id")]
+    public int AssignmentId { get; set; }
+    
+    [Column("student_id")]
+    public int StudentId { get; set; }
+    
+    [Column("file_name")]
+    public string FileName { get; set; } = string.Empty;
+    
+    [Column("file_content")]
+    public byte[] FileContent { get; set; } = Array.Empty<byte>();
+    
+    [Column("file_size")]
+    public long FileSize { get; set; }
+    
+    [Column("content_type")]
+    public string ContentType { get; set; } = string.Empty;
+    
+    [Column("is_code_file")]
+    public bool IsCodeFile { get; set; }
+    
+    [Column("uploaded_at")]
+    public DateTime UploadedAt { get; set; } = DateTime.UtcNow;
+}
+
+[Table("tenant_upb_assignment_files")]
+public class AssignmentFileUpb : BaseModel
+{
+    [PrimaryKey("id", true)]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public long Id { get; set; }
+    
+    [Column("assignment_id")]
+    public int AssignmentId { get; set; }
+    
+    [Column("student_id")]
+    public int StudentId { get; set; }
+    
+    [Column("file_name")]
+    public string FileName { get; set; } = string.Empty;
+    
+    [Column("file_content")]
+    public byte[] FileContent { get; set; } = Array.Empty<byte>();
+    
+    [Column("file_size")]
+    public long FileSize { get; set; }
+    
+    [Column("content_type")]
+    public string ContentType { get; set; } = string.Empty;
+    
+    [Column("is_code_file")]
+    public bool IsCodeFile { get; set; }
+    
+    [Column("uploaded_at")]
+    public DateTime UploadedAt { get; set; } = DateTime.UtcNow;
+}
+
+[Table("tenant_gmail_assignment_files")]
+public class AssignmentFileGmail : BaseModel
+{
+    [PrimaryKey("id", true)]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public long Id { get; set; }
+    
+    [Column("assignment_id")]
+    public int AssignmentId { get; set; }
+    
+    [Column("student_id")]
+    public int StudentId { get; set; }
+    
+    [Column("file_name")]
+    public string FileName { get; set; } = string.Empty;
+    
+    [Column("file_content")]
+    public byte[] FileContent { get; set; } = Array.Empty<byte>();
+    
+    [Column("file_size")]
+    public long FileSize { get; set; }
+    
+    [Column("content_type")]
+    public string ContentType { get; set; } = string.Empty;
+    
+    [Column("is_code_file")]
+    public bool IsCodeFile { get; set; }
+    
+    [Column("uploaded_at")]
+    public DateTime UploadedAt { get; set; } = DateTime.UtcNow;
 }
