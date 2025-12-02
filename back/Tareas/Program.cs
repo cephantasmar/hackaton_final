@@ -1664,7 +1664,6 @@ app.MapPost("/api/assignments/{assignmentId}/complete", async (
                 {
                     var fileRecord = new AssignmentFileUcb
                     {
-                        Id = 0,
                         AssignmentId = assignmentId,
                         StudentId = user.Id,
                         FileName = file.FileName,
@@ -1680,7 +1679,6 @@ app.MapPost("/api/assignments/{assignmentId}/complete", async (
                 {
                     var fileRecord = new AssignmentFileUpb
                     {
-                        Id = 0,
                         AssignmentId = assignmentId,
                         StudentId = user.Id,
                         FileName = file.FileName,
@@ -1696,7 +1694,6 @@ app.MapPost("/api/assignments/{assignmentId}/complete", async (
                 {
                     var fileRecord = new AssignmentFileGmail
                     {
-                        Id = 0,
                         AssignmentId = assignmentId,
                         StudentId = user.Id,
                         FileName = file.FileName,
@@ -1801,7 +1798,6 @@ app.MapPost("/api/assignments/{assignmentId}/complete", async (
             {
                 var newCompletion = new AssignmentCompletionUcb
                 {
-                    Id = 0,
                     AssignmentId = assignmentId,
                     StudentId = user.Id,
                     CompletedAt = completedAt,
@@ -1830,7 +1826,6 @@ app.MapPost("/api/assignments/{assignmentId}/complete", async (
             {
                 var newCompletion = new AssignmentCompletionUpb
                 {
-                    Id = 0,
                     AssignmentId = assignmentId,
                     StudentId = user.Id,
                     CompletedAt = completedAt,
@@ -1859,7 +1854,6 @@ app.MapPost("/api/assignments/{assignmentId}/complete", async (
             {
                 var newCompletion = new AssignmentCompletionGmail
                 {
-                    Id = 0,
                     AssignmentId = assignmentId,
                     StudentId = user.Id,
                     CompletedAt = completedAt,
