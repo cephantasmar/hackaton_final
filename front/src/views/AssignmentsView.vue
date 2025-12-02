@@ -194,6 +194,14 @@
                 
                 <button 
                   v-if="userRole === 'Profesor'"
+                  @click="viewSubmissions(item.assignment.id, item.assignment.title)"
+                  class="btn-primary"
+                >
+                  📁 Ver Entregas ({{ item.completions?.completed || 0 }})
+                </button>
+                
+                <button 
+                  v-if="userRole === 'Profesor'"
                   @click="viewAssignmentDetails(item.assignment.id)"
                   class="btn-outline"
                 >
@@ -294,6 +302,98 @@
           </div>
         </div>
       </div>
+
+      <!-- Modal de entregas de estudiantes -->
+      <transition name="modal-fade">
+        <div v-if="showSubmissionsModal" class="modal-overlay" @click="closeSubmissionsModal">
+          <div class="modal-content large" @click.stop>
+            <div class="modal-header">
+              <h2>📁 Entregas - {{ currentAssignmentTitle }}</h2>
+              <button @click="closeSubmissionsModal" class="modal-close">✕</button>
+            </div>
+
+            <div class="modal-body">
+              <div v-if="loadingSubmissions" class="loading-center">
+                <div class="spinner"></div>
+                <p>Cargando entregas...</p>
+              </div>
+
+              <div v-else-if="submissionsError" class="error-box">
+                {{ submissionsError }}
+              </div>
+
+              <div v-else-if="submissions.length === 0" class="empty-state">
+                <div class="empty-icon">📭</div>
+                <p>No hay entregas aún</p>
+              </div>
+
+              <div v-else class="submissions-list">
+                <div v-for="submission in submissions" :key="submission.student_id" class="submission-card">
+                  <div class="submission-header">
+                    <div class="student-info">
+                      <h3>{{ submission.student_name || `Estudiante #${submission.student_id}` }}</h3>
+                      <span class="submission-date">📅 {{ formatDate(submission.completed_at) }}</span>
+                      <span :class="['status-badge', submission.status]">
+                        {{ getStatusText(submission.status) }}
+                      </span>
+                    </div>
+                    <button 
+                      @click="toggleFiles(submission.student_id)"
+                      class="btn-toggle"
+                    >
+                      {{ expandedStudent === submission.student_id ? '▼' : '▶' }} 
+                      Ver Archivos ({{ submission.file_count || 0 }})
+                    </button>
+                  </div>
+
+                  <div v-if="submission.submitted_content" class="submission-notes">
+                    <strong>Notas:</strong>
+                    <p>{{ submission.submitted_content }}</p>
+                  </div>
+
+                  <!-- Lista de archivos -->
+                  <transition name="expand">
+                    <div v-if="expandedStudent === submission.student_id" class="files-section">
+                      <div v-if="loadingFiles" class="loading-small">
+                        <div class="spinner-small"></div> Cargando archivos...
+                      </div>
+
+                      <div v-else-if="studentFiles.length === 0" class="empty-files">
+                        No hay archivos adjuntos
+                      </div>
+
+                      <div v-else class="files-grid">
+                        <div v-for="file in studentFiles" :key="file.id" class="file-card">
+                          <div class="file-icon-large">{{ getFileIcon(file.fileName) }}</div>
+                          <div class="file-details">
+                            <h4>{{ file.fileName }}</h4>
+                            <p class="file-meta">
+                              {{ formatFileSize(file.fileSize) }} • {{ formatDate(file.uploadedAt) }}
+                            </p>
+                            <span v-if="file.isCodeFile" class="code-badge-large">💻 Código</span>
+                          </div>
+                          <button 
+                            @click="downloadFile(currentAssignmentId, file.id, file.fileName)"
+                            class="btn-download"
+                          >
+                            ⬇️ Descargar
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </transition>
+                </div>
+              </div>
+            </div>
+
+            <div class="modal-footer">
+              <button @click="closeSubmissionsModal" class="btn-secondary">
+                Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      </transition>
     </section>
   </transition>
 </template>
@@ -329,6 +429,17 @@ const debugMode = ref(false)
 const loadingDetails = ref('')
 const runningDiagnostics = ref(false)
 const diagnosticsResult = ref(null)
+
+// Submissions modal state
+const showSubmissionsModal = ref(false)
+const currentAssignmentId = ref(null)
+const currentAssignmentTitle = ref('')
+const submissions = ref([])
+const loadingSubmissions = ref(false)
+const submissionsError = ref(null)
+const expandedStudent = ref(null)
+const studentFiles = ref([])
+const loadingFiles = ref(false)
 
 const newAssignment = ref({
   title: '',
@@ -737,6 +848,153 @@ function selectCourseForAssignment(course) {
   showCreateModal.value = true
 }
 
+// Submissions modal functions
+async function viewSubmissions(assignmentId, assignmentTitle) {
+  currentAssignmentId.value = assignmentId
+  currentAssignmentTitle.value = assignmentTitle
+  showSubmissionsModal.value = true
+  expandedStudent.value = null
+  await loadSubmissions(assignmentId)
+}
+
+async function loadSubmissions(assignmentId) {
+  loadingSubmissions.value = true
+  submissionsError.value = null
+  
+  try {
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session) return
+
+    const response = await fetch(
+      `${TAREAS_API}/api/assignments/${assignmentId}/submissions`,
+      {
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+          'X-User-Email': session.user.email
+        }
+      }
+    )
+
+    if (response.ok) {
+      const data = await response.json()
+      submissions.value = data.submissions || []
+    } else {
+      submissionsError.value = 'Error al cargar las entregas'
+    }
+  } catch (e) {
+    console.error('Error loading submissions:', e)
+    submissionsError.value = 'Error de conexión'
+  } finally {
+    loadingSubmissions.value = false
+  }
+}
+
+async function toggleFiles(studentId) {
+  if (expandedStudent.value === studentId) {
+    expandedStudent.value = null
+    studentFiles.value = []
+    return
+  }
+
+  expandedStudent.value = studentId
+  loadingFiles.value = true
+  
+  try {
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session) return
+
+    const response = await fetch(
+      `${TAREAS_API}/api/assignments/${currentAssignmentId.value}/files?studentId=${studentId}`,
+      {
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+          'X-User-Email': session.user.email
+        }
+      }
+    )
+
+    if (response.ok) {
+      const data = await response.json()
+      studentFiles.value = data.files || []
+    }
+  } catch (e) {
+    console.error('Error loading files:', e)
+  } finally {
+    loadingFiles.value = false
+  }
+}
+
+async function downloadFile(assignmentId, fileId, fileName) {
+  try {
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session) return
+
+    const response = await fetch(
+      `${TAREAS_API}/api/assignments/${assignmentId}/files/${fileId}`,
+      {
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+          'X-User-Email': session.user.email
+        }
+      }
+    )
+
+    if (response.ok) {
+      const blob = await response.blob()
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = fileName
+      document.body.appendChild(a)
+      a.click()
+      window.URL.revokeObjectURL(url)
+      document.body.removeChild(a)
+    } else {
+      alert('Error al descargar archivo')
+    }
+  } catch (e) {
+    console.error('Error downloading file:', e)
+    alert('Error al descargar archivo')
+  }
+}
+
+function closeSubmissionsModal() {
+  showSubmissionsModal.value = false
+  currentAssignmentId.value = null
+  currentAssignmentTitle.value = ''
+  submissions.value = []
+  studentFiles.value = []
+  expandedStudent.value = null
+}
+
+function getStatusText(status) {
+  const statusMap = {
+    'completed': 'Completada',
+    'completed_with_errors': 'Completada con errores',
+    'pending': 'Pendiente'
+  }
+  return statusMap[status] || status
+}
+
+function getFileIcon(filename) {
+  const ext = filename.substring(filename.lastIndexOf('.')).toLowerCase()
+  if (['.py', '.js', '.ts', '.jsx', '.tsx', '.java', '.cpp', '.c', '.cs'].includes(ext)) return '💻'
+  if (['.pdf'].includes(ext)) return '📄'
+  if (['.doc', '.docx'].includes(ext)) return '📝'
+  if (['.zip', '.rar'].includes(ext)) return '📦'
+  if (['.png', '.jpg', '.jpeg', '.gif'].includes(ext)) return '🖼️'
+  if (['.html', '.css'].includes(ext)) return '🌐'
+  return '📎'
+}
+
+function formatFileSize(bytes) {
+  if (bytes === 0) return '0 Bytes'
+  const k = 1024
+  const sizes = ['Bytes', 'KB', 'MB', 'GB']
+  const i = Math.floor(Math.log(bytes) / Math.log(k))
+  return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i]
+}
+
 function onCourseFilterChange() {
   console.log('🔍 Cambiando filtro de curso:', selectedCourseId.value);
   fetchAssignments()
@@ -912,6 +1170,295 @@ onMounted(async () => {
 @keyframes slideIn { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 
+/* Submissions Modal */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 1rem;
+}
+
+.modal-content.large {
+  max-width: 900px;
+  width: 100%;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1.5rem;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.modal-header h2 {
+  margin: 0;
+  font-size: 1.5rem;
+  color: #1f2937;
+}
+
+.modal-close {
+  background: none;
+  border: none;
+  font-size: 1.5rem;
+  color: #6b7280;
+  cursor: pointer;
+  padding: 0.5rem;
+  border-radius: 4px;
+  transition: background 0.2s;
+}
+
+.modal-close:hover {
+  background: #f3f4f6;
+}
+
+.modal-body {
+  padding: 1.5rem;
+}
+
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  padding: 1.5rem;
+  border-top: 1px solid #e5e7eb;
+}
+
+.modal-fade-enter-active, .modal-fade-leave-active {
+  transition: opacity 0.3s;
+}
+
+.modal-fade-enter-from, .modal-fade-leave-to {
+  opacity: 0;
+}
+
+.loading-center {
+  text-align: center;
+  padding: 3rem;
+}
+
+.empty-state {
+  text-align: center;
+  padding: 3rem;
+  color: #6b7280;
+}
+
+.empty-icon {
+  font-size: 4rem;
+  margin-bottom: 1rem;
+}
+
+.submissions-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.submission-card {
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 1.5rem;
+}
+
+.submission-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.student-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.student-info h3 {
+  margin: 0;
+  color: #1f2937;
+  font-size: 1.125rem;
+}
+
+.submission-date {
+  font-size: 0.875rem;
+  color: #6b7280;
+}
+
+.status-badge {
+  display: inline-block;
+  padding: 0.25rem 0.75rem;
+  border-radius: 12px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.status-badge.completed {
+  background: #d1fae5;
+  color: #065f46;
+}
+
+.status-badge.completed_with_errors {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.status-badge.pending {
+  background: #e0e7ff;
+  color: #3730a3;
+}
+
+.btn-toggle {
+  background: #f3f4f6;
+  border: none;
+  padding: 0.5rem 1rem;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 600;
+  transition: background 0.2s;
+}
+
+.btn-toggle:hover {
+  background: #e5e7eb;
+}
+
+.submission-notes {
+  background: #f9fafb;
+  padding: 1rem;
+  border-radius: 8px;
+  margin-bottom: 1rem;
+}
+
+.submission-notes strong {
+  color: #374151;
+}
+
+.submission-notes p {
+  margin: 0.5rem 0 0 0;
+  color: #6b7280;
+}
+
+.files-section {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid #e5e7eb;
+}
+
+.expand-enter-active, .expand-leave-active {
+  transition: all 0.3s ease;
+  max-height: 1000px;
+  overflow: hidden;
+}
+
+.expand-enter-from, .expand-leave-to {
+  max-height: 0;
+  opacity: 0;
+}
+
+.loading-small {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: #6b7280;
+  padding: 1rem;
+}
+
+.spinner-small {
+  width: 16px;
+  height: 16px;
+  border: 2px solid #f3f4f6;
+  border-top-color: #2a4dd0;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+.empty-files {
+  text-align: center;
+  padding: 2rem;
+  color: #9ca3af;
+}
+
+.files-grid {
+  display: grid;
+  gap: 1rem;
+}
+
+.file-card {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  transition: background 0.2s;
+}
+
+.file-card:hover {
+  background: #f3f4f6;
+}
+
+.file-icon-large {
+  font-size: 2rem;
+  min-width: 50px;
+  text-align: center;
+}
+
+.file-details {
+  flex: 1;
+}
+
+.file-details h4 {
+  margin: 0 0 0.25rem 0;
+  color: #1f2937;
+  font-size: 0.875rem;
+}
+
+.file-meta {
+  margin: 0;
+  font-size: 0.75rem;
+  color: #6b7280;
+}
+
+.code-badge-large {
+  display: inline-block;
+  background: #dbeafe;
+  color: #1e40af;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  margin-top: 0.25rem;
+}
+
+.btn-download {
+  background: #2a4dd0;
+  color: white;
+  border: none;
+  padding: 0.5rem 1rem;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 600;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.btn-download:hover {
+  background: #1e3a8a;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(42, 77, 208, 0.3);
+}
+
 @media (max-width: 768px) {
   .header { flex-wrap: wrap; }
   .btn-primary { margin-left: 0; width: 100%; }
@@ -920,5 +1467,24 @@ onMounted(async () => {
   .assignment-actions button { width: 100%; }
   .form-row { grid-template-columns: 1fr; }
   .assignment-header { flex-direction: column; gap: 0.5rem; }
+  
+  .submission-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1rem;
+  }
+  
+  .btn-toggle {
+    width: 100%;
+  }
+  
+  .file-card {
+    flex-direction: column;
+    text-align: center;
+  }
+  
+  .btn-download {
+    width: 100%;
+  }
 }
 </style>

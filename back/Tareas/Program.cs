@@ -2084,6 +2084,144 @@ app.MapGet("/api/assignments/{assignmentId}/files", async (
     }
 }).RequireAuthorization();
 
+// 🔹 LISTAR ENTREGAS DE UNA TAREA (PARA PROFESORES)
+app.MapGet("/api/assignments/{assignmentId}/submissions", async (
+    HttpContext context,
+    int assignmentId,
+    [FromServices] Client supabase
+) =>
+{
+    Console.WriteLine($"📋 Endpoint: Listar entregas de tarea {assignmentId}");
+    
+    try
+    {
+        var email = context.User.FindFirst("http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress")?.Value;
+        if (string.IsNullOrEmpty(email))
+        {
+            Console.WriteLine("❌ Usuario no autenticado");
+            return Results.Unauthorized();
+        }
+
+        var user = await GetUserFromToken(email);
+        if (user == null)
+        {
+            Console.WriteLine("❌ Usuario no encontrado");
+            return Results.NotFound("Usuario no encontrado");
+        }
+
+        // Solo profesores pueden ver todas las entregas
+        if (user.Rol != "Profesor")
+        {
+            Console.WriteLine("❌ Solo profesores pueden ver las entregas");
+            return Results.Forbid();
+        }
+
+        var tenant = GetTenantFromEmail(email);
+        var submissions = new List<object>();
+
+        if (tenant == "ucb")
+        {
+            var completions = await supabase.From<AssignmentCompletionUcb>()
+                .Where(x => x.AssignmentId == assignmentId)
+                .Get();
+
+            foreach (var completion in completions.Models)
+            {
+                // Obtener información del estudiante
+                var student = await supabase.From<UsuarioUcb>()
+                    .Where(x => x.Id == completion.StudentId)
+                    .Single();
+
+                // Contar archivos del estudiante
+                var filesCount = await supabase.From<AssignmentFileUcb>()
+                    .Where(x => x.AssignmentId == assignmentId && x.StudentId == completion.StudentId)
+                    .Get();
+
+                submissions.Add(new
+                {
+                    student_id = completion.StudentId,
+                    student_name = student?.Nombre,
+                    student_email = student?.Email,
+                    completed_at = completion.CompletedAt,
+                    status = completion.Status,
+                    submitted_content = completion.SubmittedContent,
+                    grade = completion.Grade,
+                    feedback = completion.Feedback,
+                    file_count = filesCount.Models.Count
+                });
+            }
+        }
+        else if (tenant == "upb")
+        {
+            var completions = await supabase.From<AssignmentCompletionUpb>()
+                .Where(x => x.AssignmentId == assignmentId)
+                .Get();
+
+            foreach (var completion in completions.Models)
+            {
+                var student = await supabase.From<UsuarioUpb>()
+                    .Where(x => x.Id == completion.StudentId)
+                    .Single();
+
+                var filesCount = await supabase.From<AssignmentFileUpb>()
+                    .Where(x => x.AssignmentId == assignmentId && x.StudentId == completion.StudentId)
+                    .Get();
+
+                submissions.Add(new
+                {
+                    student_id = completion.StudentId,
+                    student_name = student?.Nombre,
+                    student_email = student?.Email,
+                    completed_at = completion.CompletedAt,
+                    status = completion.Status,
+                    submitted_content = completion.SubmittedContent,
+                    grade = completion.Grade,
+                    feedback = completion.Feedback,
+                    file_count = filesCount.Models.Count
+                });
+            }
+        }
+        else // gmail
+        {
+            var completions = await supabase.From<AssignmentCompletionGmail>()
+                .Where(x => x.AssignmentId == assignmentId)
+                .Get();
+
+            foreach (var completion in completions.Models)
+            {
+                var student = await supabase.From<UsuarioGmail>()
+                    .Where(x => x.Id == completion.StudentId)
+                    .Single();
+
+                var filesCount = await supabase.From<AssignmentFileGmail>()
+                    .Where(x => x.AssignmentId == assignmentId && x.StudentId == completion.StudentId)
+                    .Get();
+
+                submissions.Add(new
+                {
+                    student_id = completion.StudentId,
+                    student_name = student?.Nombre,
+                    student_email = student?.Email,
+                    completed_at = completion.CompletedAt,
+                    status = completion.Status,
+                    submitted_content = completion.SubmittedContent,
+                    grade = completion.Grade,
+                    feedback = completion.Feedback,
+                    file_count = filesCount.Models.Count
+                });
+            }
+        }
+
+        Console.WriteLine($"✅ Encontradas {submissions.Count} entregas");
+        return Results.Ok(new { submissions = submissions, total = submissions.Count });
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"💥 Error listando entregas: {ex.Message}");
+        return Results.Problem($"Error listando entregas: {ex.Message}");
+    }
+}).RequireAuthorization();
+
 // Método helper para obtener nombres de columnas
 static List<string> GetColumnNames(object obj)
 {
