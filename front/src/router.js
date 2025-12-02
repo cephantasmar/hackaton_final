@@ -30,6 +30,7 @@ import DirectorReports from './views/DirectorReports.vue'
 import TeacherDashboard from './views/TeacherDashboard.vue'
 import DirectorDashboard from './views/DirectorDashboard.vue'
 import StudentDashboard from './views/StudentDashboard.vue'
+import PlagiarismDetection from './views/PlagiarismDetection.vue' 
 
 const routes = [
   { path: '/', redirect: '/landing' },
@@ -46,6 +47,7 @@ const routes = [
   
   // App Pages (Authenticated - use AppLayout with sidebar)
   { path: '/home', component: StudentDashboard, meta: { requiresAuth: true, layout: 'app' } }, // Student home
+  { path: '/PlagiarismDetection', component: PlagiarismDetection, meta: { requiresAuth: true, requiresDirector: true, layout: 'app' } },
   { path: '/foro', component: Foro, meta: { requiresAuth: true, layout: 'app' } },
   { path: '/courses', component: Courses, meta: { requiresAuth: true, layout: 'app' } },
   { path: '/my-courses', component: MyCourses, meta: { requiresAuth: true, layout: 'app' } },

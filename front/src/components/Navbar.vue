@@ -32,6 +32,11 @@
             >Roles</router-link>
             <router-link 
               v-if="userProfile?.rol === 'Director'" 
+              to="/PlagiarismDetection" 
+              class="nav-link admin-link"
+            >Plagio</router-link>
+            <router-link 
+              v-if="userProfile?.rol === 'Director'" 
               to="/director" 
               class="nav-link admin-link"
             >Gestión Usuarios</router-link>

@@ -171,6 +171,14 @@
             <span class="nav-icon">💾</span>
             <span v-if="!sidebarCollapsed" class="nav-text">Base de Datos</span>
           </router-link>
+          <router-link 
+            to="/PlagiarismDetection" 
+            class="nav-item"
+            :title="sidebarCollapsed ? 'Base de Datos' : ''"
+          >
+            <span class="nav-icon">💾</span>
+            <span v-if="!sidebarCollapsed" class="nav-text">plagio</span>
+          </router-link>
         </div>
       </nav>
 
