@@ -2356,7 +2356,7 @@ public class AssignmentUcb : BaseModel
 public class AssignmentCompletionUcb : BaseModel
 {
     [PrimaryKey("id", true)]
-    public int Id { get; set; }
+    public long Id { get; set; }
     
     [Column("assignment_id")]
     public int AssignmentId { get; set; }
@@ -2473,7 +2473,7 @@ public class AssignmentUpb : BaseModel
 public class AssignmentCompletionUpb : BaseModel
 {
     [PrimaryKey("id", true)]
-    public int Id { get; set; }
+    public long Id { get; set; }
     
     [Column("assignment_id")]
     public int AssignmentId { get; set; }
@@ -2590,7 +2590,7 @@ public class AssignmentGmail : BaseModel
 public class AssignmentCompletionGmail : BaseModel
 {
     [PrimaryKey("id", true)]
-    public int Id { get; set; }
+    public long Id { get; set; }
     
     [Column("assignment_id")]
     public int AssignmentId { get; set; }
@@ -2632,7 +2632,7 @@ public class InscripcionGmail : BaseModel
 public class AssignmentFileUcb : BaseModel
 {
     [PrimaryKey("id", true)]
-    public int Id { get; set; }
+    public long Id { get; set; }
     
     [Column("assignment_id")]
     public int AssignmentId { get; set; }
@@ -2663,7 +2663,7 @@ public class AssignmentFileUcb : BaseModel
 public class AssignmentFileUpb : BaseModel
 {
     [PrimaryKey("id", true)]
-    public int Id { get; set; }
+    public long Id { get; set; }
     
     [Column("assignment_id")]
     public int AssignmentId { get; set; }
@@ -2694,7 +2694,7 @@ public class AssignmentFileUpb : BaseModel
 public class AssignmentFileGmail : BaseModel
 {
     [PrimaryKey("id", true)]
-    public int Id { get; set; }
+    public long Id { get; set; }
     
     [Column("assignment_id")]
     public int AssignmentId { get; set; }

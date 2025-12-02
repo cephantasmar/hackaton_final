@@ -2,13 +2,13 @@
 
 -- Tabla para archivos de UCB
 CREATE TABLE IF NOT EXISTS tenant_ucb_assignment_files (
-    id SERIAL PRIMARY KEY,
+    id BIGSERIAL PRIMARY KEY,
     assignment_id INTEGER NOT NULL,
     student_id INTEGER NOT NULL,
     file_name VARCHAR(255) NOT NULL,
     file_content BYTEA NOT NULL,
     file_size BIGINT NOT NULL,
-    content_type VARCHAR(100) NOT NULL,
+    content_type VARCHAR(255) NOT NULL,
     is_code_file BOOLEAN DEFAULT FALSE,
     uploaded_at TIMESTAMP DEFAULT NOW(),
     CONSTRAINT fk_ucb_assignment FOREIGN KEY (assignment_id) REFERENCES tenant_ucb_assignments(id) ON DELETE CASCADE,
@@ -22,13 +22,13 @@ CREATE INDEX idx_ucb_files_code ON tenant_ucb_assignment_files(is_code_file) WHE
 
 -- Tabla para archivos de UPB
 CREATE TABLE IF NOT EXISTS tenant_upb_assignment_files (
-    id SERIAL PRIMARY KEY,
+    id BIGSERIAL PRIMARY KEY,
     assignment_id INTEGER NOT NULL,
     student_id INTEGER NOT NULL,
     file_name VARCHAR(255) NOT NULL,
     file_content BYTEA NOT NULL,
     file_size BIGINT NOT NULL,
-    content_type VARCHAR(100) NOT NULL,
+    content_type VARCHAR(255) NOT NULL,
     is_code_file BOOLEAN DEFAULT FALSE,
     uploaded_at TIMESTAMP DEFAULT NOW(),
     CONSTRAINT fk_upb_assignment FOREIGN KEY (assignment_id) REFERENCES tenant_upb_assignments(id) ON DELETE CASCADE,
@@ -42,13 +42,13 @@ CREATE INDEX idx_upb_files_code ON tenant_upb_assignment_files(is_code_file) WHE
 
 -- Tabla para archivos de Gmail
 CREATE TABLE IF NOT EXISTS tenant_gmail_assignment_files (
-    id SERIAL PRIMARY KEY,
+    id BIGSERIAL PRIMARY KEY,
     assignment_id INTEGER NOT NULL,
     student_id INTEGER NOT NULL,
     file_name VARCHAR(255) NOT NULL,
     file_content BYTEA NOT NULL,
     file_size BIGINT NOT NULL,
-    content_type VARCHAR(100) NOT NULL,
+    content_type VARCHAR(255) NOT NULL,
     is_code_file BOOLEAN DEFAULT FALSE,
     uploaded_at TIMESTAMP DEFAULT NOW(),
     CONSTRAINT fk_gmail_assignment FOREIGN KEY (assignment_id) REFERENCES tenant_gmail_assignments(id) ON DELETE CASCADE,
