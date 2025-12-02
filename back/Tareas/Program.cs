@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Supabase;
 using Supabase.Postgrest.Models;
 using Supabase.Postgrest.Attributes;
@@ -2356,6 +2357,7 @@ public class AssignmentUcb : BaseModel
 public class AssignmentCompletionUcb : BaseModel
 {
     [PrimaryKey("id", true)]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public long Id { get; set; }
     
     [Column("assignment_id")]
@@ -2473,6 +2475,7 @@ public class AssignmentUpb : BaseModel
 public class AssignmentCompletionUpb : BaseModel
 {
     [PrimaryKey("id", true)]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public long Id { get; set; }
     
     [Column("assignment_id")]
@@ -2590,6 +2593,7 @@ public class AssignmentGmail : BaseModel
 public class AssignmentCompletionGmail : BaseModel
 {
     [PrimaryKey("id", true)]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public long Id { get; set; }
     
     [Column("assignment_id")]
@@ -2632,6 +2636,7 @@ public class InscripcionGmail : BaseModel
 public class AssignmentFileUcb : BaseModel
 {
     [PrimaryKey("id", true)]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public long Id { get; set; }
     
     [Column("assignment_id")]
@@ -2663,6 +2668,7 @@ public class AssignmentFileUcb : BaseModel
 public class AssignmentFileUpb : BaseModel
 {
     [PrimaryKey("id", true)]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public long Id { get; set; }
     
     [Column("assignment_id")]
@@ -2694,6 +2700,7 @@ public class AssignmentFileUpb : BaseModel
 public class AssignmentFileGmail : BaseModel
 {
     [PrimaryKey("id", true)]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public long Id { get; set; }
     
     [Column("assignment_id")]
