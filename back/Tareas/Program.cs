@@ -1535,6 +1535,293 @@ app.MapGet("/api/debug/full-diagnostics", async (HttpContext context, [FromServi
         return Results.Problem($"Error: {ex.Message}");
     }
 }).RequireAuthorization();
+// 🔹 COMPLETAR TAREA CON ARCHIVOS
+app.MapPost("/api/assignments/{assignmentId}/complete", async (
+    HttpContext context,
+    int assignmentId,
+    [FromServices] Client supabase
+) =>
+{
+    Console.WriteLine($"📤 Endpoint: Completar tarea {assignmentId} con archivos");
+    
+    try
+    {
+        var email = context.User.FindFirst("http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress")?.Value;
+        if (string.IsNullOrEmpty(email))
+        {
+            Console.WriteLine("❌ Usuario no autenticado");
+            return Results.Unauthorized();
+        }
+
+        var user = await GetUserFromToken(email);
+        if (user == null)
+        {
+            Console.WriteLine("❌ Usuario no encontrado");
+            return Results.NotFound("Usuario no encontrado");
+        }
+
+        var tenant = GetTenantFromEmail(email);
+        var form = await context.Request.ReadFormAsync();
+        var files = form.Files;
+        var notes = form["notes"].ToString();
+
+        Console.WriteLine($"📦 Usuario: {email}, Archivos: {files.Count}");
+
+        // Validar que el estudiante esté inscrito en el curso
+        bool isEnrolled = false;
+        int courseId = 0;
+
+        if (tenant == "ucb")
+        {
+            var assignment = await supabase.From<AssignmentUcb>()
+                .Where(x => x.Id == assignmentId)
+                .Single();
+            
+            if (assignment == null)
+            {
+                Console.WriteLine("❌ Tarea no encontrada");
+                return Results.NotFound("Tarea no encontrada");
+            }
+
+            courseId = assignment.CursoId;
+
+            var enrollment = await supabase.From<InscripcionUcb>()
+                .Where(x => x.UsuarioId == user.Id && x.CursoId == courseId)
+                .Get();
+            
+            isEnrolled = enrollment.Models.Any();
+        }
+        else if (tenant == "upb")
+        {
+            var assignment = await supabase.From<AssignmentUpb>()
+                .Where(x => x.Id == assignmentId)
+                .Single();
+            
+            if (assignment == null)
+            {
+                Console.WriteLine("❌ Tarea no encontrada");
+                return Results.NotFound("Tarea no encontrada");
+            }
+
+            courseId = assignment.CursoId;
+
+            var enrollment = await supabase.From<InscripcionUpb>()
+                .Where(x => x.UsuarioId == user.Id && x.CursoId == courseId)
+                .Get();
+            
+            isEnrolled = enrollment.Models.Any();
+        }
+        else // gmail
+        {
+            var assignment = await supabase.From<AssignmentGmail>()
+                .Where(x => x.Id == assignmentId)
+                .Single();
+            
+            if (assignment == null)
+            {
+                Console.WriteLine("❌ Tarea no encontrada");
+                return Results.NotFound("Tarea no encontrada");
+            }
+
+            courseId = assignment.CursoId;
+
+            var enrollment = await supabase.From<InscripcionGmail>()
+                .Where(x => x.UsuarioId == user.Id && x.CursoId == courseId)
+                .Get();
+            
+            isEnrolled = enrollment.Models.Any();
+        }
+
+        if (!isEnrolled)
+        {
+            Console.WriteLine("❌ Estudiante no inscrito en el curso");
+            return Results.Problem("No estás inscrito en este curso");
+        }
+
+        // Procesar archivos
+        var fileResults = new List<object>();
+        var codeAnalysisResults = new List<object>();
+        var codeFileExtensions = new[] { ".py", ".js", ".ts", ".jsx", ".tsx", ".java", ".cpp", ".c", ".cs", ".html", ".css" };
+
+        using var httpClient = new HttpClient();
+        httpClient.BaseAddress = new Uri("http://localhost:5015");
+
+        foreach (var file in files)
+        {
+            var extension = Path.GetExtension(file.FileName).ToLowerInvariant();
+            var isCodeFile = codeFileExtensions.Contains(extension);
+
+            Console.WriteLine($"📄 Procesando archivo: {file.FileName} (Código: {isCodeFile})");
+
+            if (isCodeFile && file.Length > 0)
+            {
+                try
+                {
+                    // Enviar al microservicio de CodeAnalysis
+                    using var content = new MultipartFormDataContent();
+                    using var fileStream = file.OpenReadStream();
+                    using var streamContent = new StreamContent(fileStream);
+                    
+                    streamContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(file.ContentType ?? "application/octet-stream");
+                    content.Add(streamContent, "file", file.FileName);
+                    content.Add(new StringContent(assignmentId.ToString()), "assignment_id");
+                    content.Add(new StringContent(user.Id.ToString()), "student_id");
+
+                    var response = await httpClient.PostAsync("/api/submissions/upload", content);
+                    
+                    if (response.IsSuccessStatusCode)
+                    {
+                        var responseContent = await response.Content.ReadAsStringAsync();
+                        Console.WriteLine($"✅ Análisis completado para {file.FileName}");
+                        codeAnalysisResults.Add(new
+                        {
+                            fileName = file.FileName,
+                            status = "analyzed",
+                            response = responseContent
+                        });
+                    }
+                    else
+                    {
+                        var errorContent = await response.Content.ReadAsStringAsync();
+                        Console.WriteLine($"⚠️ Error analizando {file.FileName}: {errorContent}");
+                        codeAnalysisResults.Add(new
+                        {
+                            fileName = file.FileName,
+                            status = "error",
+                            error = errorContent
+                        });
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"💥 Error procesando {file.FileName}: {ex.Message}");
+                    codeAnalysisResults.Add(new
+                    {
+                        fileName = file.FileName,
+                        status = "error",
+                        error = ex.Message
+                    });
+                }
+            }
+
+            fileResults.Add(new
+            {
+                fileName = file.FileName,
+                size = file.Length,
+                isCode = isCodeFile,
+                extension = extension
+            });
+        }
+
+        // Crear o actualizar registro de completación
+        var completedAt = DateTime.UtcNow;
+        var status = codeAnalysisResults.Any(r => r.GetType().GetProperty("status")?.GetValue(r)?.ToString() == "error") 
+            ? "completed_with_errors" 
+            : "completed";
+
+        if (tenant == "ucb")
+        {
+            var existing = await supabase.From<AssignmentCompletionUcb>()
+                .Where(x => x.AssignmentId == assignmentId && x.StudentId == user.Id)
+                .Get();
+
+            if (existing.Models.Any())
+            {
+                var completion = existing.Models.First();
+                completion.CompletedAt = completedAt;
+                completion.Status = status;
+                completion.SubmittedContent = notes;
+                await supabase.From<AssignmentCompletionUcb>().Update(completion);
+            }
+            else
+            {
+                var newCompletion = new AssignmentCompletionUcb
+                {
+                    AssignmentId = assignmentId,
+                    StudentId = user.Id,
+                    CompletedAt = completedAt,
+                    Status = status,
+                    SubmittedContent = notes
+                };
+                await supabase.From<AssignmentCompletionUcb>().Insert(newCompletion);
+            }
+        }
+        else if (tenant == "upb")
+        {
+            var existing = await supabase.From<AssignmentCompletionUpb>()
+                .Where(x => x.AssignmentId == assignmentId && x.StudentId == user.Id)
+                .Get();
+
+            if (existing.Models.Any())
+            {
+                var completion = existing.Models.First();
+                completion.CompletedAt = completedAt;
+                completion.Status = status;
+                completion.SubmittedContent = notes;
+                await supabase.From<AssignmentCompletionUpb>().Update(completion);
+            }
+            else
+            {
+                var newCompletion = new AssignmentCompletionUpb
+                {
+                    AssignmentId = assignmentId,
+                    StudentId = user.Id,
+                    CompletedAt = completedAt,
+                    Status = status,
+                    SubmittedContent = notes
+                };
+                await supabase.From<AssignmentCompletionUpb>().Insert(newCompletion);
+            }
+        }
+        else // gmail
+        {
+            var existing = await supabase.From<AssignmentCompletionGmail>()
+                .Where(x => x.AssignmentId == assignmentId && x.StudentId == user.Id)
+                .Get();
+
+            if (existing.Models.Any())
+            {
+                var completion = existing.Models.First();
+                completion.CompletedAt = completedAt;
+                completion.Status = status;
+                completion.SubmittedContent = notes;
+                await supabase.From<AssignmentCompletionGmail>().Update(completion);
+            }
+            else
+            {
+                var newCompletion = new AssignmentCompletionGmail
+                {
+                    AssignmentId = assignmentId,
+                    StudentId = user.Id,
+                    CompletedAt = completedAt,
+                    Status = status,
+                    SubmittedContent = notes
+                };
+                await supabase.From<AssignmentCompletionGmail>().Insert(newCompletion);
+            }
+        }
+
+        Console.WriteLine($"✅ Tarea completada. Archivos: {files.Count}, Código analizado: {codeAnalysisResults.Count}");
+
+        return Results.Ok(new
+        {
+            message = "Tarea completada exitosamente",
+            filesProcessed = files.Count,
+            codeFilesAnalyzed = codeAnalysisResults.Count,
+            files = fileResults,
+            codeAnalysis = codeAnalysisResults,
+            status = status
+        });
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"💥 Error completando tarea: {ex.Message}");
+        Console.WriteLine($"💥 Stack trace: {ex.StackTrace}");
+        return Results.Problem($"Error completando tarea: {ex.Message}");
+    }
+}).RequireAuthorization()
+  .DisableAntiforgery(); // Necesario para file uploads
+
 // Método helper para obtener nombres de columnas
 static List<string> GetColumnNames(object obj)
 {
