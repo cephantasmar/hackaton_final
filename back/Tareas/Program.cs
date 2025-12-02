@@ -1664,6 +1664,7 @@ app.MapPost("/api/assignments/{assignmentId}/complete", async (
                 {
                     var fileRecord = new AssignmentFileUcb
                     {
+                        Id = 0,
                         AssignmentId = assignmentId,
                         StudentId = user.Id,
                         FileName = file.FileName,
@@ -1673,12 +1674,13 @@ app.MapPost("/api/assignments/{assignmentId}/complete", async (
                         IsCodeFile = isCodeFile,
                         UploadedAt = DateTime.UtcNow
                     };
-                    await supabase.From<AssignmentFileUcb>().Insert(fileRecord);
+                    await supabase.From<AssignmentFileUcb>().Insert(fileRecord, new Postgrest.QueryOptions { Returning = Postgrest.QueryOptions.ReturnType.Minimal });
                 }
                 else if (tenant == "upb")
                 {
                     var fileRecord = new AssignmentFileUpb
                     {
+                        Id = 0,
                         AssignmentId = assignmentId,
                         StudentId = user.Id,
                         FileName = file.FileName,
@@ -1688,12 +1690,13 @@ app.MapPost("/api/assignments/{assignmentId}/complete", async (
                         IsCodeFile = isCodeFile,
                         UploadedAt = DateTime.UtcNow
                     };
-                    await supabase.From<AssignmentFileUpb>().Insert(fileRecord);
+                    await supabase.From<AssignmentFileUpb>().Insert(fileRecord, new Postgrest.QueryOptions { Returning = Postgrest.QueryOptions.ReturnType.Minimal });
                 }
                 else // gmail
                 {
                     var fileRecord = new AssignmentFileGmail
                     {
+                        Id = 0,
                         AssignmentId = assignmentId,
                         StudentId = user.Id,
                         FileName = file.FileName,
@@ -1703,7 +1706,7 @@ app.MapPost("/api/assignments/{assignmentId}/complete", async (
                         IsCodeFile = isCodeFile,
                         UploadedAt = DateTime.UtcNow
                     };
-                    await supabase.From<AssignmentFileGmail>().Insert(fileRecord);
+                    await supabase.From<AssignmentFileGmail>().Insert(fileRecord, new Postgrest.QueryOptions { Returning = Postgrest.QueryOptions.ReturnType.Minimal });
                 }
 
                 Console.WriteLine($"💾 Archivo guardado en base de datos: {file.FileName}");
@@ -1798,13 +1801,15 @@ app.MapPost("/api/assignments/{assignmentId}/complete", async (
             {
                 var newCompletion = new AssignmentCompletionUcb
                 {
+                    Id = 0,
                     AssignmentId = assignmentId,
                     StudentId = user.Id,
                     CompletedAt = completedAt,
                     Status = status,
                     SubmittedContent = notes
                 };
-                await supabase.From<AssignmentCompletionUcb>().Insert(newCompletion);
+                var response = await supabase.From<AssignmentCompletionUcb>().Insert(newCompletion, new Postgrest.QueryOptions { Returning = Postgrest.QueryOptions.ReturnType.Minimal });
+                Console.WriteLine($"✅ Completación UCB creada");
             }
         }
         else if (tenant == "upb")
@@ -1825,13 +1830,15 @@ app.MapPost("/api/assignments/{assignmentId}/complete", async (
             {
                 var newCompletion = new AssignmentCompletionUpb
                 {
+                    Id = 0,
                     AssignmentId = assignmentId,
                     StudentId = user.Id,
                     CompletedAt = completedAt,
                     Status = status,
                     SubmittedContent = notes
                 };
-                await supabase.From<AssignmentCompletionUpb>().Insert(newCompletion);
+                var response = await supabase.From<AssignmentCompletionUpb>().Insert(newCompletion, new Postgrest.QueryOptions { Returning = Postgrest.QueryOptions.ReturnType.Minimal });
+                Console.WriteLine($"✅ Completación UPB creada");
             }
         }
         else // gmail
@@ -1852,13 +1859,15 @@ app.MapPost("/api/assignments/{assignmentId}/complete", async (
             {
                 var newCompletion = new AssignmentCompletionGmail
                 {
+                    Id = 0,
                     AssignmentId = assignmentId,
                     StudentId = user.Id,
                     CompletedAt = completedAt,
                     Status = status,
                     SubmittedContent = notes
                 };
-                await supabase.From<AssignmentCompletionGmail>().Insert(newCompletion);
+                var response = await supabase.From<AssignmentCompletionGmail>().Insert(newCompletion, new Postgrest.QueryOptions { Returning = Postgrest.QueryOptions.ReturnType.Minimal });
+                Console.WriteLine($"✅ Completación Gmail creada");
             }
         }
 
